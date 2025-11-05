@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aventura de Sílabas</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Fredoka', sans-serif;
+        }
+        .hidden {
+            display: none;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .animate-spin {
+            animation: spin 1s linear infinite;
+        }
+        @keyframes fade-in {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in {
+            animation: fade-in 0.3s ease-out forwards;
+        }
+    </style>
+    <script type="importmap">
+    {
+      "imports": {
+        "@google/genai": "https://aistudiocdn.com/@google/genai@^1.28.0"
+      }
+    }
+    </script>
+</head>
+<body class="bg-gradient-to-br from-blue-200 via-indigo-200 to-purple-200 flex items-center justify-center min-h-screen p-4">
+
+    <!-- Pantalla de Bienvenida -->
+    <div id="welcome-screen" class="text-center p-8 bg-white rounded-2xl shadow-2xl max-w-md mx-auto">
+        <h1 class="text-5xl font-extrabold text-indigo-800 mb-2">Aventura de Sílabas</h1>
+        <p class="text-xl text-gray-600 mb-8">¡Demuestra que eres un experto separando palabras! Elige un nivel para empezar.</p>
+        <div class="space-y-4">
+            <button id="level-1-btn" class="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 px-6 rounded-2xl text-3xl shadow-lg transform hover:scale-105 transition-transform duration-300 ease-in-out">
+                Nivel 1
+            </button>
+            <button id="level-2-btn" class="w-full bg-blue-500 hover:bg-blue-600 text-white font-bold py-4 px-6 rounded-2xl text-3xl shadow-lg transform hover:scale-105 transition-transform duration-300 ease-in-out">
+                Nivel 2
+            </button>
+        </div>
+        <p class="text-sm text-gray-500 mt-6">Nivel 1: Todas las palabras. Nivel 2: Solo palabras con 2 o más sílabas.</p>
+    </div>
+
+    <!-- Pantalla de Juego -->
+    <div id="game-screen" class="w-full max-w-lg mx-auto p-4 md:p-6 text-center hidden">
+        <div class="flex justify-between items-center mb-4 text-xl font-bold text-indigo-700">
+            <span>Nivel: <span id="level-display"></span></span>
+            <span>Puntos: <span id="score-display">0</span></span>
+        </div>
+        
+        <!-- Tarjeta de la Palabra -->
+        <div class="bg-white rounded-2xl shadow-2xl p-8 mb-8 flex items-center justify-center min-h-[120px]">
+            <p id="word-display" class="text-6xl font-bold text-indigo-700 tracking-wider"></p>
+        </div>
+
+        <!-- Indicador de Feedback -->
+        <div id="feedback-container"></div>
+
+        <!-- Selector de Sílabas -->
+        <div id="syllable-selector-container" class="mt-8">
+            <p class="text-2xl text-gray-700 font-medium mb-4">¿Cuántas sílabas tiene?</p>
+            <div id="syllable-buttons" class="grid grid-cols-5 gap-3">
+                <!-- Los botones se generan con JavaScript -->
+            </div>
+        </div>
+
+        <!-- Input para Guiones -->
+        <form id="hyphen-form" class="mt-8 w-full hidden">
+            <p class="text-2xl text-gray-700 font-medium mb-4">Ahora, escribe la palabra separando las sílabas con un guion (-)</p>
+            <input type="text" id="hyphen-input" class="w-full p-4 text-3xl text-center border-4 border-indigo-300 rounded-xl shadow-inner focus:outline-none focus:ring-4 focus:ring-indigo-400 disabled:bg-gray-200" placeholder="e-jem-plo" autofocus />
+            <button type="submit" id="hyphen-submit-btn" class="mt-6 w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-3 px-4 rounded-xl text-2xl shadow-lg transform hover:scale-105 transition-transform duration-200 disabled:bg-gray-400 disabled:cursor-not-allowed">
+                Comprobar
+            </button>
+        </form>
+
+        <!-- Botón de Siguiente Palabra -->
+        <button id="next-word-btn" class="mt-8 w-full bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-xl text-2xl shadow-lg transform hover:scale-105 transition-transform duration-200 hidden">
+            Siguiente Palabra
+        </button>
+
+        <!-- Botón de Volver al Menú -->
+        <button id="main-menu-btn" class="mt-4 w-full bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-xl text-lg">
+            Volver al Menú
+        </button>
+    </div>
+
+    <!-- Pantalla de Carga -->
+    <div id="loading-spinner" class="hidden flex justify-center items-center p-8">
+        <div class="animate-spin rounded-full h-16 w-16 border-t-4 border-b-4 border-indigo-500"></div>
+        <p id="loading-message" class="ml-4 text-xl text-indigo-700 font-semibold"></p>
+    </div>
+
+    <script type="module">
+        import { GoogleGenAI, Type } from "@google/genai";
+
+        // --- ESTADO DE LA APLICACIÓN ---
+        let currentWord = null;
+        let score = 0;
+        let level = 1;
+        let isLoading = false;
+        
+        // --- REFERENCIAS A ELEMENTOS DEL DOM ---
+        const welcomeScreen = document.getElementById('welcome-screen');
+        const gameScreen = document.getElementById('game-screen');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const loadingMessage = document.getElementById('loading-message');
+        
+        const levelDisplay = document.getElementById('level-display');
+        const scoreDisplay = document.getElementById('score-display');
+        const wordDisplay = document.getElementById('word-display');
+        
+        const feedbackContainer = document.getElementById('feedback-container');
+        const syllableSelectorContainer = document.getElementById('syllable-selector-container');
+        const syllableButtonsContainer = document.getElementById('syllable-buttons');
+        
+        const hyphenForm = document.getElementById('hyphen-form');
+        const hyphenInput = document.getElementById('hyphen-input');
+        const hyphenSubmitBtn = document.getElementById('hyphen-submit-btn');
+
+        const nextWordBtn = document.getElementById('next-word-btn');
+        const mainMenuBtn = document.getElementById('main-menu-btn');
+        const level1Btn = document.getElementById('level-1-btn');
+        const level2Btn = document.getElementById('level-2-btn');
+
+        // --- LÓGICA DE LA API DE GEMINI ---
+        const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+        const verificationSchema = { type: Type.OBJECT, properties: { isCorrect: { type: Type.BOOLEAN }, correctHyphenation: { type: Type.STRING }, explanation: { type: Type.STRING } }, required: ["isCorrect", "correctHyphenation", "explanation"] };
+        const wordGenerationSchema = { type: Type.OBJECT, properties: { word: { type: Type.STRING }, syllables: { type: Type.NUMBER } }, required: ["word", "syllables"] };
+        
+        async function verifyHyphenation(originalWord, userHyphenatedWord) {
+            const prompt = `Eres un asistente de gramática española para niños de 7 años. La palabra es '${originalWord}'. Un alumno la separó así: '${userHyphenatedWord}'. Analiza si es correcto y responde solo con JSON: {"isCorrect": boolean, "correctHyphenation": "separación-correcta", "explanation": "explicación simple si es incorrecto"}.`;
+            try {
+                const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt, config: { responseMimeType: "application/json", responseSchema: verificationSchema } });
+                return JSON.parse(response.text.trim());
+            } catch (error) {
+                console.error("Error en API (verificación):", error);
+                return { isCorrect: false, correctHyphenation: "Error", explanation: "No se pudo verificar." };
+            }
+        }
+
+        async function generateNewWord(level, previousWord) {
+            const levelConstraint = level === 2 ? "La palabra debe tener dos o más sílabas." : "La palabra puede tener cualquier número de sílabas.";
+            const prompt = `Genera una única palabra en español, fácil para un niño de 7 años. ${levelConstraint} No repitas '${previousWord || ''}'. Responde solo con JSON: {"word": "palabra", "syllables": numero}.`;
+            try {
+                const response = await ai.models.generateContent({ model: "gemini-2.5-flash", contents: prompt, config: { responseMimeType: "application/json", responseSchema: wordGenerationSchema } });
+                return JSON.parse(response.text.trim());
+            } catch (error) {
+                console.error("Error en API (generación):", error);
+                return { word: "jugar", syllables: 2 }; // Palabra de respaldo
+            }
+        }
+
+        // --- LÓGICA DEL JUEGO ---
+        
+        function showScreen(screen) {
+            welcomeScreen.classList.add('hidden');
+            gameScreen.classList.add('hidden');
+            loadingSpinner.classList.add('hidden');
+            screen.classList.remove('hidden');
+        }
+
+        function showLoading(message) {
+            isLoading = true;
+            loadingMessage.textContent = message;
+            showScreen(loadingSpinner);
+        }
+
+        function updateUIForNewWord() {
+            wordDisplay.textContent = currentWord.word;
+            levelDisplay.textContent = level;
+            scoreDisplay.textContent = score;
+            feedbackContainer.innerHTML = '';
+            
+            hyphenInput.value = '';
+            hyphenForm.classList.add('hidden');
+            nextWordBtn.classList.add('hidden');
+            syllableSelectorContainer.classList.remove('hidden');
+            setUIEnabled(true);
+        }
+
+        async function fetchNewWord() {
+            showLoading('Buscando palabra...');
+            const wordData = await generateNewWord(level, currentWord?.word || null);
+            currentWord = wordData;
+            isLoading = false;
+            showScreen(gameScreen);
+            updateUIForNewWord();
+        }
+
+        function handleSyllableSelect(count) {
+            if (isLoading) return;
+
+            if (count === currentWord.syllables) {
+                showFeedback('correct', '¡Correcto!', 'Ahora separa la palabra.');
+                syllableSelectorContainer.classList.add('hidden');
+                hyphenForm.classList.remove('hidden');
+                hyphenInput.focus();
+            } else {
+                showFeedback('incorrect', '¡Inténtalo de nuevo!', `La palabra "${currentWord.word}" no tiene ${count} sílabas.`);
+                setUIEnabled(false);
+                nextWordBtn.classList.remove('hidden');
+            }
+        }
+
+        async function handleHyphenSubmit(event) {
+            event.preventDefault();
+            if (isLoading || !hyphenInput.value.trim()) return;
+
+            showLoading('Verificando...');
+            const userHyphenatedWord = hyphenInput.value.trim();
+            const result = await verifyHyphenation(currentWord.word, userHyphenatedWord);
+            
+            isLoading = false;
+            showScreen(gameScreen);
+
+            if (result.isCorrect) {
+                score++;
+                scoreDisplay.textContent = score;
+                showFeedback('correct', '¡Excelente separación!');
+            } else {
+                showFeedback('incorrect', '¡Ups! Esa no es la separación correcta.', `La forma correcta es: ${result.correctHyphenation}. ${result.explanation}`);
+            }
+            setUIEnabled(false);
+            hyphenForm.classList.add('hidden');
+            nextWordBtn.classList.remove('hidden');
+        }
+
+        function handleStartGame(selectedLevel) {
+            level = selectedLevel;
+            score = 0;
+            currentWord = null;
+            fetchNewWord();
+        }
+
+        function handleGoToMainMenu() {
+            score = 0;
+            level = 1;
+            currentWord = null;
+            showScreen(welcomeScreen);
+        }
+        
+        // --- HELPERS DE UI ---
+
+        function setUIEnabled(isEnabled) {
+            hyphenInput.disabled = !isEnabled;
+            hyphenSubmitBtn.disabled = !isEnabled;
+            syllableButtonsContainer.querySelectorAll('button').forEach(btn => btn.disabled = !isEnabled);
+        }
+
+        function showFeedback(type, message, details = '') {
+            const isCorrect = type === 'correct';
+            const bgColor = isCorrect ? 'bg-green-100' : 'bg-red-100';
+            const borderColor = isCorrect ? 'border-green-400' : 'border-red-400';
+            const textColor = isCorrect ? 'text-green-800' : 'text-red-800';
+            const icon = isCorrect 
+                ? `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" /></svg>`
+                : `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-red-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>`;
+
+            const detailsHtml = details ? `<p class="mt-1 text-md ${textColor}">${details}</p>` : '';
+
+            feedbackContainer.innerHTML = `
+                <div class="mt-6 p-4 border-l-8 ${borderColor} ${bgColor} rounded-lg shadow-md animate-fade-in">
+                    <div class="flex items-center">
+                        <div class="flex-shrink-0">${icon}</div>
+                        <div class="ml-3 text-left">
+                            <p class="text-xl font-bold ${textColor}">${message}</p>
+                            ${detailsHtml}
+                        </div>
+                    </div>
+                </div>`;
+        }
+
+        function createSyllableButtons() {
+            syllableButtonsContainer.innerHTML = '';
+            for (let i = 1; i <= 5; i++) {
+                const button = document.createElement('button');
+                button.textContent = i;
+                button.className = 'p-4 text-3xl font-bold text-white rounded-xl shadow-lg transition-all duration-200 transform bg-blue-500 hover:bg-blue-600 hover:scale-110 disabled:bg-gray-400 disabled:cursor-not-allowed';
+                button.onclick = () => handleSyllableSelect(i);
+                syllableButtonsContainer.appendChild(button);
+            }
+        }
+        
+        // --- INICIALIZACIÓN Y EVENTOS ---
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            level1Btn.addEventListener('click', () => handleStartGame(1));
+            level2Btn.addEventListener('click', () => handleStartGame(2));
+            mainMenuBtn.addEventListener('click', handleGoToMainMenu);
+            nextWordBtn.addEventListener('click', fetchNewWord);
+            hyphenForm.addEventListener('submit', handleHyphenSubmit);
+
+            createSyllableButtons();
+            showScreen(welcomeScreen);
+        });
+    </script>
+</body>
+</html>
